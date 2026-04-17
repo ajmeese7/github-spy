@@ -1,245 +1,294 @@
-# GitHub User Monitor
+# github-spy
 
-A small CLI tool for collecting and storing a GitHub user's public activity over time.
+**Archive GitHub users' ephemeral public activity into durable, queryable local history.**
 
-It monitors:
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-- public user events
-- current starred repositories
+---
 
-It stores state locally in SQLite so you can build your own historical dataset instead of relying on GitHub's short public activity windows.
+GitHub's public data is ephemeral. Events disappear after 90 days. Stars, followers, and repos are mutable with no built-in changelog. If someone unstars a repo, unfollows you, or deletes a project, that information is gone.
 
-## Features
+**github-spy** polls GitHub's REST API on a schedule and stores everything locally in SQLite, creating a persistent, queryable archive of what changed and when.
 
-- `snapshot` mode for one-off collection runs
-- `watch` mode for continuous polling
-- SQLite-backed storage
-- conditional requests using `ETag` and `Last-Modified`
-- `.env` support for `GH_TOKEN`
-- `inspect` mode to review local state without calling GitHub
-- JSON output option for automation
+## What it tracks
 
-## Why this exists
+| Data | What's detected |
+|------|----------------|
+| **Events** | Push, PR, issue, star, fork, and all other public event types — each row gets a derived `url` (compare URL for pushes, PR URL, issue URL, etc.) and a `details` one-liner (e.g. `"pushed 3 commits to main — fix flaky test"`) so the archive is actionable, not just a dump |
+| **Stars** | Which repos a user has starred, plus star/unstar changes over time |
+| **Followers** | Who follows the user, plus follow/unfollow changes |
+| **Following** | Who the user follows, plus follow/unfollow changes |
+| **Repos** | Public repositories owned by the user, plus creation/deletion |
+| **Profile** | Field-level change tracking (bio, company, location, follower counts, etc.) |
 
-GitHub exposes useful public activity data, but the public feeds are not a complete long-term archive. If you want durable history for an account, you need to poll periodically and store what you observe.
-
-## Requirements
-
-- Python 3.10+
-- a GitHub token is recommended
-
-## Setup
-
-### Virtual environment
-
-Linux/macOS:
+## Install
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+uv tool install github-spy
+# or
+pipx install github-spy
 ```
 
-Windows PowerShell:
+Or clone and run directly:
 
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
+```bash
+git clone https://github.com/ajmeese7/github-spy.git
+cd github-spy
+uv sync
+uv run github-spy --help
 ```
 
-### Token
+## Quick start
 
-Create a fine-grained personal access token in GitHub and make it available as `GH_TOKEN`.
+```bash
+# Set your token (optional but recommended for higher rate limits)
+export GH_TOKEN=ghp_...
 
-GitHub path:
+# Take a snapshot of a user's public activity
+github-spy snapshot ajmeese7
 
-1. **Settings**
-2. **Developer settings**
-3. **Personal access tokens**
-4. **Fine-grained tokens**
-5. **Generate new token**
+# Monitor multiple users continuously (every 15 minutes)
+github-spy watch ajmeese7 torvalds --interval 900
 
-Recommended setup for this tool:
-
-- name: `gh-user-monitor`
-- owner: your personal account
-- expiration: set one
-- repository access: **Public repositories** is enough for this script's current use case
-- permissions: keep them minimal
-
-Example `.env`:
-
-```dotenv
-GH_TOKEN=your_token_here
+# View what you've collected
+github-spy stats ajmeese7
 ```
 
-The script will load `.env` by default. You can also point it at a different file with `--env-file`.
-
-## Usage
+## Example output
 
 ### Snapshot
 
-Collect one pass of public data for a user:
+```
+╭──────────────────────── ajmeese7 (Aaron Meese) ──────────────────────────────╮
+│ 2026-04-17T14:21:31Z                                                         │
+│   111 repos / 217 followers / 146 following                                  │
+│   profile:                                                                   │
+│   events: +198 new                                                           │
+│     + 2026-04-17T02:28:47Z PushEvent meese-enterprises/uptime-monitor        │
+│     + 2026-04-17T02:01:08Z PushEvent meese-enterprises/uptime-monitor        │
+│     + 2026-04-16T23:33:59Z PushEvent meese-enterprises/uptime-monitor        │
+│     + 2026-04-16T21:28:54Z WatchEvent Hona/temple-oc                         │
+│     + 2026-04-16T15:02:14Z WatchEvent zonelessdev/zoneless                   │
+│     ... and 193 more                                                         │
+│   stars: 1000 total 1000 changes                                             │
+│   followers: 217 total 217 changes                                           │
+│   following: 146 total 146 changes                                           │
+│   repos: 111 total 111 changes                                               │
+│   API quota: 4985/5000 remaining                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+### Stats
+
+```
+Stats for ajmeese7
+
+Event Types
+  PushEvent          ████████████████████████████████████████ 95
+  WatchEvent         ███████████████ 36
+  IssuesEvent        ████████████ 30
+  IssueCommentEvent  ██████ 15
+  PullRequestEvent   █████ 14
+  CreateEvent        ██ 6
+  ForkEvent           2
+
+Starred Repos by Language
+  Python      ████████████████████████████████████████ 290
+  TypeScript  ██████████████████ 137
+  Go          █████████ 70
+  JavaScript  █████████ 67
+  C           ███████ 55
+  Shell       ██████ 47
+  Rust        ██████ 45
+  C++         ██████ 44
+  HTML        ████ 36
+  Java        ██ 19
+
+              Most Active Repos
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓
+┃ Repository                       ┃ Events ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━┩
+│ meese-enterprises/uptime-monitor │    120 │
+│ ajmeese7/hermes-agent            │      8 │
+│ ajmeese7/fog-libvirt             │      7 │
+│ LetsFG/LetsFG                    │      6 │
+│ ajmeese7/summarize               │      6 │
+│ neo4j-labs/neo4rs                │      5 │
+│ NousResearch/hermes-agent        │      4 │
+└──────────────────────────────────┴────────┘
+
+Daily Activity (last 30 days)
+  2026-03-30 ▃▆▆▅▂▁▁▂▄▁▃▅█▁▁▁▄▆  2026-04-17
+  198 events total, peak 24/day
+```
+
+### Users
+
+```
+                  Tracked Users
+┏━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━┓
+┃ Username ┃ Events ┃ Stars ┃ Followers ┃ Repos ┃
+┡━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━╇━━━━━━━┩
+│ ajmeese7 │    198 │  1000 │       217 │   111 │
+└──────────┴────────┴───────┴───────────┴───────┘
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `snapshot <users...>` | One-time collection of public activity |
+| `watch <users...>` | Continuous polling on an interval |
+| `inspect <user>` | View locally stored data (no API calls) |
+| `show <event_id>` | Print a single event's full detail (URL, summary, raw payload) |
+| `stats <user>` | Terminal-rendered analytics and charts |
+| `export <user>` | Export data as CSV, JSON, or JSONL |
+| `diff <user>` | Show changes between two points in time (includes events) |
+| `users` | List all tracked users in the database |
+
+All commands support `--json` for machine-readable output.
 
 ```bash
-python gh_user_monitor.py snapshot torvalds
+# Snapshot only specific data types
+github-spy snapshot ajmeese7 --collect events,stars
+
+# Export events as CSV for spreadsheet analysis — includes url, details, payload_json
+github-spy export ajmeese7 --type events --format csv --output events.csv
+
+# See what changed since last week (stars, followers, repos, profile, AND events)
+github-spy diff ajmeese7 --since 2026-04-10
+
+# Inspect recent follower changes
+github-spy inspect ajmeese7 --type followers --limit 50
+
+# Filter events by type, repo, or date range
+github-spy inspect ajmeese7 --type events --event-type PullRequestEvent,IssuesEvent
+github-spy inspect ajmeese7 --type events --repo meese-enterprises/uptime-monitor
+github-spy inspect ajmeese7 --type events --since 2026-04-10 --until 2026-04-17
+
+# Drill into a single event — renders URL, summary, and the full payload JSON
+github-spy show 52345678901
 ```
 
-Collect only events:
+Run `github-spy <command> --help` for full options.
+
+## Use cases
+
+- **Track star/unstar patterns** as a signal for repo interest or hiring activity
+- **Monitor open source maintainers** to understand contribution patterns
+- **Build a personal activity archive** before GitHub's 90-day event window expires
+- **Detect bulk follow/unfollow** activity (bot detection, growth tracking)
+- **Track when repos appear or disappear** from a user's profile
+- **Feed data into external tools** via CSV/JSON export for custom analysis
+
+## Storage
+
+Data lives in a single SQLite database at `~/.local/share/github-spy/github-spy.db` by default. Override with `--db /path/to/file.db`.
+
+## Poking at the SQLite directly
+
+The `export` and `inspect` commands cover the common paths, but the DB is the authoritative artifact. Everything is plain SQLite. Open it in [TablePlus](https://tableplus.com/), [DB Browser for SQLite](https://sqlitebrowser.org/), [DBeaver](https://dbeaver.io/), or [sqlite-utils](https://sqlite-utils.datasette.io/), or just shell out:
 
 ```bash
-python gh_user_monitor.py snapshot torvalds --mode events
+sqlite3 ~/.local/share/github-spy/github-spy.db
 ```
 
-Collect only stars:
+### Table map
+
+| Table | What it holds |
+|---|---|
+| `events` | Every ingested public event with `url`, `details`, and the full `payload_json` |
+| `stars_current` / `star_history` | Current starred repos / add + remove history |
+| `followers_current` / `follower_history` | Current followers / follow + unfollow history |
+| `following_current` / `following_history` | Current followees / follow + unfollow history |
+| `repos_current` / `repo_history` | Current public repos / create + delete history |
+| `profiles` / `profile_history` | Latest profile JSON / field-level change log |
+| `api_cache` | ETag / Last-Modified caches (only used for events now) |
+| `metadata` | Schema and migration bookkeeping |
+
+### Useful queries
+
+```sql
+-- Most recent PR activity with URLs you can paste into a browser
+SELECT created_at, action, repo_name, details, url
+FROM events
+WHERE username = 'ajmeese7'
+  AND event_type = 'PullRequestEvent'
+ORDER BY created_at DESC
+LIMIT 20;
+
+-- Breakdown of event volume by type
+SELECT event_type, COUNT(*) AS n
+FROM events
+WHERE username = 'ajmeese7'
+GROUP BY event_type
+ORDER BY n DESC;
+
+-- Stars gained / lost in the last 30 days
+SELECT event_kind, full_name, detected_at
+FROM star_history
+WHERE username = 'ajmeese7'
+  AND detected_at > DATE('now', '-30 days')
+ORDER BY detected_at DESC;
+
+-- Follower churn summary
+SELECT event_kind, COUNT(*) AS n
+FROM follower_history
+WHERE username = 'ajmeese7'
+GROUP BY event_kind;
+
+-- Profile field changes over time
+SELECT field_name, old_value, new_value, detected_at
+FROM profile_history
+WHERE username = 'ajmeese7'
+ORDER BY detected_at DESC;
+
+-- Daily event velocity for the last 30 days
+SELECT DATE(created_at) AS day, COUNT(*) AS n
+FROM events
+WHERE username = 'ajmeese7'
+  AND created_at > DATE('now', '-30 days')
+GROUP BY day
+ORDER BY day DESC;
+
+-- Commit messages extracted from the raw payload
+SELECT
+  created_at,
+  repo_name,
+  json_extract(payload_json, '$.payload.commits[0].message') AS first_commit_message
+FROM events
+WHERE username = 'ajmeese7'
+  AND event_type = 'PushEvent'
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+## Token setup
+
+A GitHub personal access token is optional but recommended. Without one, you're limited to 60 API requests/hour. With a token, you get 5,000/hour.
+
+Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with **Public Repositories (read-only)** access. No other permissions needed.
 
 ```bash
-python gh_user_monitor.py snapshot torvalds --mode stars
+# Option 1: Environment variable
+export GH_TOKEN=ghp_...
+
+# Option 2: .env file
+echo "GH_TOKEN=ghp_..." > .env
+
+# Option 3: Direct flag (not recommended for scripts)
+github-spy snapshot torvalds --token ghp_...
 ```
 
-Write state somewhere specific:
+## Rate limiting
 
-```bash
-python gh_user_monitor.py snapshot torvalds --state-dir ./state/torvalds
-```
-
-Emit machine-readable output:
-
-```bash
-python gh_user_monitor.py snapshot torvalds --json
-```
-
-### Watch
-
-Poll continuously every 15 minutes:
-
-```bash
-python gh_user_monitor.py watch torvalds --interval 900
-```
-
-Poll into a specific state directory:
-
-```bash
-python gh_user_monitor.py watch torvalds --interval 900 --state-dir ./state/torvalds
-```
-
-### Inspect
-
-View recently collected local data without calling GitHub:
-
-```bash
-python gh_user_monitor.py inspect torvalds
-```
-
-Show more rows:
-
-```bash
-python gh_user_monitor.py inspect torvalds --limit 25
-```
-
-Emit JSON:
-
-```bash
-python gh_user_monitor.py inspect torvalds --json
-```
-
-## CLI reference
-
-### Global options
-
-- `--token`
-  GitHub token passed directly on the command line
-
-- `--token-env`
-  Environment variable name to read the token from
-  Default: `GH_TOKEN`
-
-- `--env-file`
-  Path to a `.env`-style file
-  Default: `.env`
-
-- `--state-dir`
-  Directory used for local state
-  Default: `./gh_monitor_state`
-
-- `--db-name`
-  SQLite filename inside `--state-dir`
-  Default: `monitor.db`
-
-- `--events-pages`
-  Number of pages to request from `/users/\{username\}/events/public`
-  Default: `3`
-
-- `--stars-pages`
-  Number of pages to request from `/users/\{username\}/starred`
-  Default: `10`
-
-- `--user-agent`
-  HTTP `User-Agent` value
-  Default: `gh-user-monitor/2.0`
-
-- `--timeout`
-  HTTP timeout in seconds
-  Default: `30`
-
-- `--json`
-  Emit JSON summaries instead of text output
-
-### Subcommands
-
-#### `snapshot`
-
-Run one collection pass.
-
-```bash
-python gh_user_monitor.py snapshot USERNAME [--mode events|stars|all] [--quiet]
-```
-
-#### `watch`
-
-Run continuous polling.
-
-```bash
-python gh_user_monitor.py watch USERNAME [--mode events|stars|all] [--interval SECONDS] [--quiet]
-```
-
-#### `inspect`
-
-Read local SQLite state without hitting GitHub.
-
-```bash
-python gh_user_monitor.py inspect USERNAME [--limit N]
-```
-
-## Storage layout
-
-By default the tool writes a SQLite database here:
-
-```text
-./gh_monitor_state/monitor.db
-```
-
-The database contains:
-
-- cached profile data
-- normalized public events
-- current starred repos
-- historical star add/remove detections
-- API cache metadata for conditional requests
-
-## Notes and limitations
-
-- this only sees **public** activity
-- event history is limited by what GitHub still exposes when you poll
-- if activity happens between polls and disappears before the next run, you can miss it
-- star removals are detected by diffing snapshots over time
-- this tool does not yet do deep repo-level enrichment for issues and PRs
-
-## Typical workflow
-
-1. create a `.env` with `GH_TOKEN`
-2. run an initial `snapshot`
-3. run `watch` on an interval for ongoing collection
-4. use `inspect` or your own SQLite queries for analysis
+github-spy automatically tracks your API quota and:
+- Warns when requests are running low
+- Sleeps with a progress bar when rate limited
+- Extends polling intervals in watch mode when quota is low
+- Retries transient server errors with exponential backoff
+- Uses HTTP conditional requests (ETag/Last-Modified) on the events feed to skip unchanged pages. Full-state endpoints (stars, followers, following, repos) deliberately bypass the cache: a partial 304 would leave the collector with an incomplete list and fabricate phantom unfollow / delete events. The full sweep for a typical user is ~30 requests against a 5,000/hour quota, so the tradeoff is trivial.
 
 ## License
 
