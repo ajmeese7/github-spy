@@ -72,6 +72,9 @@ def _format_collector_result(result: CollectionResult) -> str:
     if result.change_count > 0:
         parts.append(f"[yellow]{result.change_count} changes[/yellow]")
 
+    if result.details.get("truncated"):
+        parts.append("[red](truncated - diff skipped)[/red]")
+
     line = " ".join(parts)
 
     # Show detail lines

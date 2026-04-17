@@ -36,9 +36,9 @@ def snapshot(
     username: str,
     collect: tuple[str, ...] = ("all",),
     events_pages: int = 3,
-    stars_pages: int = 10,
-    followers_pages: int = 10,
-    repos_pages: int = 10,
+    stars_pages: int | None = None,
+    followers_pages: int | None = None,
+    repos_pages: int | None = None,
 ) -> SnapshotSummary:
     """Run a single collection pass for one user."""
     collectors = _resolve_collectors(collect)
@@ -92,9 +92,9 @@ def watch(
     interval: int = 900,
     collect: tuple[str, ...] = ("all",),
     events_pages: int = 3,
-    stars_pages: int = 10,
-    followers_pages: int = 10,
-    repos_pages: int = 10,
+    stars_pages: int | None = None,
+    followers_pages: int | None = None,
+    repos_pages: int | None = None,
     on_snapshot: Any = None,
 ) -> None:
     """Continuously poll for all specified users on an interval.

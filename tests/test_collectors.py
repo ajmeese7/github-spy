@@ -130,11 +130,12 @@ class _FakePaginatedClient:
         self.get_json_calls: list[tuple[str, Any]] = []
         self.last_rate_limit = None
 
-    def paginate(self, path: str, *, max_pages: int = 10, **kwargs: Any):
+    def paginate(self, path: str, *, max_pages: int | None = None, **kwargs: Any):
         # Record whatever the collector passed along.
         self.last_paginate_kwargs = {"path": path, "max_pages": max_pages, **kwargs}
-        for i, page_items in enumerate(self.pages, start=1):
-            yield 200, page_items, i
+        limit = len(self.pages) if max_pages is None else min(max_pages, len(self.pages))
+        for i in range(1, limit + 1):
+            yield 200, self.pages[i - 1], i
 
     def get_json(self, path: str, *, cache_entry: Any = None):
         self.get_json_calls.append((path, cache_entry))
@@ -270,6 +271,121 @@ class TestCollectorModuleSanity:
         assert "cache_setter" not in src, (
             f"{module.__name__} reintroduced cache_setter; this reopens the phantom-change bug"
         )
+
+
+class TestTruncationGuard:
+    """Hitting the page cap with a full last page means our view is truncated.
+    In that state the diff must be skipped entirely - replacing *_current and
+    emitting *_history rows is the bug that shipped 2 phantom unstars after
+    the user added 2 real stars (1000-cap pagination pushed 2 off the bottom).
+    """
+
+    def _make_star_page(self, start: int, count: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "starred_at": "2024-01-15T10:00:00Z",
+                "repo": {
+                    "id": i,
+                    "full_name": f"u/r{i}",
+                    "html_url": f"https://github.com/u/r{i}",
+                    "private": False,
+                    "fork": False,
+                    "language": "Python",
+                    "stargazers_count": 1,
+                    "owner": {"login": "u"},
+                    "name": f"r{i}",
+                },
+            }
+            for i in range(start, start + count)
+        ]
+
+    def test_stars_truncation_skips_diff(self, db_path, monkeypatch) -> None:
+        import github_spy.collectors.stars as stars_mod
+
+        monkeypatch.setattr(stars_mod, "PER_PAGE", 2)
+        # Seed stars_current so a diff WOULD produce changes if it ran.
+        with Storage(db_path) as storage:
+            storage.replace_current_stars(
+                "octocat",
+                [StarSnapshot(full_name="u/old", repo_id=999)],
+            )
+            # Two pages of 2 items each = full last page = truncation signal.
+            client = _FakePaginatedClient(
+                pages=[self._make_star_page(1, 2), self._make_star_page(3, 2)]
+            )
+            result = fetch_stars(cast(GitHubClient, client), storage, "octocat", max_pages=2)
+            # Truncation signal set and diff suppressed.
+            assert result.details["truncated"] is True
+            assert result.change_count == 0
+            # stars_current must be untouched - the "u/old" row survives.
+            current = storage.get_current_stars("octocat")
+            assert "u/old" in current
+            # No history rows emitted.
+            assert storage.recent_star_changes("octocat") == []
+
+    def test_stars_no_truncation_when_last_page_partial(self, db_path, monkeypatch) -> None:
+        import github_spy.collectors.stars as stars_mod
+
+        monkeypatch.setattr(stars_mod, "PER_PAGE", 2)
+        with Storage(db_path) as storage:
+            # Last page has 1 item (< PER_PAGE=2), so exhaustion, not truncation.
+            client = _FakePaginatedClient(
+                pages=[self._make_star_page(1, 2), self._make_star_page(3, 1)]
+            )
+            result = fetch_stars(cast(GitHubClient, client), storage, "octocat", max_pages=5)
+            assert result.details["truncated"] is False
+            assert result.change_count == 3  # all three are new
+
+    def test_followers_truncation_skips_diff(self, db_path, monkeypatch) -> None:
+        import github_spy.collectors.followers as followers_mod
+
+        monkeypatch.setattr(followers_mod, "PER_PAGE", 2)
+        with Storage(db_path) as storage:
+            storage.replace_current_followers(
+                "octocat",
+                [FollowerSnapshot(login="ghost", user_id=99)],
+            )
+            full_page = [
+                {"login": "a", "id": 1, "html_url": "https://github.com/a"},
+                {"login": "b", "id": 2, "html_url": "https://github.com/b"},
+            ]
+            client = _FakePaginatedClient(pages=[full_page])
+            result = fetch_followers(cast(GitHubClient, client), storage, "octocat", max_pages=1)
+        assert result.details["truncated"] is True
+        assert result.change_count == 0
+        # ghost must survive - diff didn't run so nothing got replaced.
+        with Storage(db_path) as storage:
+            assert "ghost" in storage.get_current_followers("octocat")
+
+    def test_repos_truncation_skips_diff(self, db_path, monkeypatch) -> None:
+        import github_spy.collectors.repos as repos_mod
+
+        monkeypatch.setattr(repos_mod, "PER_PAGE", 2)
+        with Storage(db_path) as storage:
+            storage.replace_current_repos(
+                "octocat",
+                [RepoSnapshot(full_name="octocat/saved")],
+            )
+            full_page = [
+                {
+                    "id": i,
+                    "full_name": f"octocat/new{i}",
+                    "html_url": f"https://github.com/octocat/new{i}",
+                    "language": "Go",
+                    "description": "x",
+                    "fork": False,
+                    "stargazers_count": 1,
+                    "owner": {"login": "octocat"},
+                    "name": f"new{i}",
+                }
+                for i in range(2)
+            ]
+            client = _FakePaginatedClient(pages=[full_page])
+            result = fetch_repos(cast(GitHubClient, client), storage, "octocat", max_pages=1)
+        assert result.details["truncated"] is True
+        assert result.change_count == 0
+        with Storage(db_path) as storage:
+            assert "octocat/saved" in storage.get_current_repos("octocat")
 
 
 class TestDiffProfiles:

@@ -77,15 +77,27 @@ def diff_stars(
     return changes
 
 
+PER_PAGE = 100
+
+
 def fetch_stars(
     client: GitHubClient,
     storage: Storage,
     username: str,
-    max_pages: int = 10,
+    max_pages: int | None = None,
 ) -> CollectionResult:
-    """Fetch starred repos and detect changes. Returns collection summary."""
+    """Fetch starred repos and detect changes. Returns collection summary.
+
+    max_pages=None (default) paginates to exhaustion. Caps only exist for
+    tests and edge-case tuning; a cap that's hit with a full last page means
+    our view is truncated, and the diff logic WILL fabricate phantom
+    `unstarred` rows (same failure mode as 304 caching). Truncation is
+    detected and the diff is skipped entirely in that case.
+    """
     all_stars: list[StarSnapshot] = []
     changed = False
+    pages_fetched = 0
+    last_page_size = 0
 
     # No conditional caching here: a 304 on any single page would leave all_stars
     # incomplete, and the downstream diff-against-full-state would invent spurious
@@ -96,16 +108,21 @@ def fetch_stars(
         params={"sort": "created", "direction": "desc"},
         accept="application/vnd.github.star+json",
         max_pages=max_pages,
+        per_page=PER_PAGE,
     ):
         items = page[1]
         changed = True
+        pages_fetched += 1
+        last_page_size = len(items)
         for raw in items:
             snap = normalize_star(raw)
             if snap:
                 all_stars.append(snap)
 
+    truncated = max_pages is not None and pages_fetched >= max_pages and last_page_size == PER_PAGE
+
     changes: list[StarChange] = []
-    if changed:
+    if changed and not truncated:
         previous = storage.get_current_stars(username)
         current_map = {s.full_name: s for s in all_stars}
         changes = diff_stars(previous, current_map, username)
@@ -120,6 +137,7 @@ def fetch_stars(
         change_count=len(changes),
         details={
             "total_stars": len(all_stars),
+            "truncated": truncated,
             "changes": [_change_summary(c) for c in changes[:20]],
         },
     )

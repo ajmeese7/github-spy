@@ -59,40 +59,57 @@ def _diff_user_lists(
     return changes
 
 
+PER_PAGE = 100
+
+
 def _fetch_user_list(
     client: GitHubClient,
     path: str,
-    max_pages: int,
-) -> tuple[bool, list[FollowerSnapshot]]:
-    # No conditional caching on paginated list endpoints: a 304 on a single
-    # page would leave the list partial, and the "replace current / diff"
-    # path below would invent phantom unfollow events for everyone on cached
-    # pages. See collectors/stars.py for the same pattern.
+    max_pages: int | None,
+) -> tuple[bool, list[FollowerSnapshot], bool]:
+    """Return (changed, users, truncated).
+
+    truncated=True when the caller capped max_pages AND the final page was
+    completely full — meaning GitHub has more rows beyond our window. In that
+    case callers must skip the replace+diff to avoid fabricating phantom
+    unfollow rows for users who fell off the bottom of our window.
+
+    No conditional caching on paginated list endpoints: a 304 on a single
+    page would leave the list partial, same fabrication bug. See
+    collectors/stars.py for the full explanation.
+    """
     all_users: list[FollowerSnapshot] = []
     changed = False
+    pages_fetched = 0
+    last_page_size = 0
 
-    for page in client.paginate(path, max_pages=max_pages):
+    for page in client.paginate(path, max_pages=max_pages, per_page=PER_PAGE):
         items = page[1]
         changed = True
+        pages_fetched += 1
+        last_page_size = len(items)
         for raw in items:
             snap = _normalize_user(raw)
             if snap.login:
                 all_users.append(snap)
 
-    return changed, all_users
+    truncated = max_pages is not None and pages_fetched >= max_pages and last_page_size == PER_PAGE
+    return changed, all_users, truncated
 
 
 def fetch_followers(
     client: GitHubClient,
     storage: Storage,
     username: str,
-    max_pages: int = 10,
+    max_pages: int | None = None,
 ) -> CollectionResult:
     """Fetch followers list and detect follow/unfollow changes."""
-    changed, all_followers = _fetch_user_list(client, f"/users/{username}/followers", max_pages)
+    changed, all_followers, truncated = _fetch_user_list(
+        client, f"/users/{username}/followers", max_pages
+    )
 
     changes: list[FollowerChange] = []
-    if changed:
+    if changed and not truncated:
         previous = storage.get_current_followers(username)
         current_map = {f.login: f for f in all_followers}
         changes = _diff_user_lists(previous, current_map, username)
@@ -107,6 +124,7 @@ def fetch_followers(
         change_count=len(changes),
         details={
             "total_followers": len(all_followers),
+            "truncated": truncated,
             "changes": [{"login": c.login, "kind": c.kind.value} for c in changes[:20]],
         },
     )
@@ -116,13 +134,15 @@ def fetch_following(
     client: GitHubClient,
     storage: Storage,
     username: str,
-    max_pages: int = 10,
+    max_pages: int | None = None,
 ) -> CollectionResult:
     """Fetch following list and detect follow/unfollow changes."""
-    changed, all_following = _fetch_user_list(client, f"/users/{username}/following", max_pages)
+    changed, all_following, truncated = _fetch_user_list(
+        client, f"/users/{username}/following", max_pages
+    )
 
     changes: list[FollowerChange] = []
-    if changed:
+    if changed and not truncated:
         previous = storage.get_current_following(username)
         current_map = {f.login: f for f in all_following}
         changes = _diff_user_lists(previous, current_map, username)
@@ -137,6 +157,7 @@ def fetch_following(
         change_count=len(changes),
         details={
             "total_following": len(all_following),
+            "truncated": truncated,
             "changes": [{"login": c.login, "kind": c.kind.value} for c in changes[:20]],
         },
     )

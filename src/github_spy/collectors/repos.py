@@ -68,31 +68,46 @@ def diff_repos(
     return changes
 
 
+PER_PAGE = 100
+
+
 def fetch_repos(
     client: GitHubClient,
     storage: Storage,
     username: str,
-    max_pages: int = 10,
+    max_pages: int | None = None,
 ) -> CollectionResult:
-    """Fetch public repos and detect creation/deletion changes."""
+    """Fetch public repos and detect creation/deletion changes.
+
+    max_pages=None (default) paginates to exhaustion. A hit cap with a full
+    last page means truncation and the diff is skipped to avoid phantom
+    `deleted` rows for repos that fell off the bottom of our window.
+    """
     all_repos: list[RepoSnapshot] = []
     changed = False
+    pages_fetched = 0
+    last_page_size = 0
 
     # No conditional caching: see collectors/stars.py for rationale.
     for page in client.paginate(
         f"/users/{username}/repos",
         params={"type": "owner", "sort": "updated", "direction": "desc"},
         max_pages=max_pages,
+        per_page=PER_PAGE,
     ):
         items = page[1]
         changed = True
+        pages_fetched += 1
+        last_page_size = len(items)
         for raw in items:
             snap = normalize_repo(raw)
             if snap:
                 all_repos.append(snap)
 
+    truncated = max_pages is not None and pages_fetched >= max_pages and last_page_size == PER_PAGE
+
     changes: list[RepoChange] = []
-    if changed:
+    if changed and not truncated:
         previous = storage.get_current_repos(username)
         current_map = {r.full_name: r for r in all_repos}
         changes = diff_repos(previous, current_map, username)
@@ -107,6 +122,7 @@ def fetch_repos(
         change_count=len(changes),
         details={
             "total_repos": len(all_repos),
+            "truncated": truncated,
             "changes": [
                 {"repo_name": c.repo_name, "kind": c.kind.value, "language": c.language}
                 for c in changes[:20]

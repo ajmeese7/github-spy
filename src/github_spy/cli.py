@@ -123,18 +123,33 @@ def app(
     help="Comma-separated collectors: events,stars,followers,following,repos,profile,all",
 )
 @click.option("--events-pages", type=int, default=3, help="Pages of events to fetch.")
-@click.option("--stars-pages", type=int, default=10, help="Pages of stars to fetch.")
-@click.option("--followers-pages", type=int, default=10, help="Pages of followers to fetch.")
-@click.option("--repos-pages", type=int, default=10, help="Pages of repos to fetch.")
+@click.option(
+    "--stars-pages",
+    type=int,
+    default=None,
+    help="Cap on pages of stars (default: paginate to exhaustion).",
+)
+@click.option(
+    "--followers-pages",
+    type=int,
+    default=None,
+    help="Cap on pages of followers/following (default: paginate to exhaustion).",
+)
+@click.option(
+    "--repos-pages",
+    type=int,
+    default=None,
+    help="Cap on pages of repos (default: paginate to exhaustion).",
+)
 @click.pass_context
 def snapshot_cmd(
     ctx: click.Context,
     usernames: tuple[str, ...],
     collect: str,
     events_pages: int,
-    stars_pages: int,
-    followers_pages: int,
-    repos_pages: int,
+    stars_pages: int | None,
+    followers_pages: int | None,
+    repos_pages: int | None,
 ) -> None:
     """Take a one-time snapshot of user activity."""
     collectors = _parse_collect(collect)
@@ -168,9 +183,9 @@ def snapshot_cmd(
 @click.option("--interval", type=int, default=900, help="Polling interval in seconds.")
 @click.option("--collect", default="all", help="Comma-separated collectors.")
 @click.option("--events-pages", type=int, default=3)
-@click.option("--stars-pages", type=int, default=10)
-@click.option("--followers-pages", type=int, default=10)
-@click.option("--repos-pages", type=int, default=10)
+@click.option("--stars-pages", type=int, default=None)
+@click.option("--followers-pages", type=int, default=None)
+@click.option("--repos-pages", type=int, default=None)
 @click.pass_context
 def watch_cmd(
     ctx: click.Context,
@@ -178,9 +193,9 @@ def watch_cmd(
     interval: int,
     collect: str,
     events_pages: int,
-    stars_pages: int,
-    followers_pages: int,
-    repos_pages: int,
+    stars_pages: int | None,
+    followers_pages: int | None,
+    repos_pages: int | None,
 ) -> None:
     """Continuously poll for user activity on an interval."""
     collectors = _parse_collect(collect)

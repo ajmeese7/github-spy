@@ -164,12 +164,19 @@ class GitHubClient:
         *,
         params: dict[str, Any] | None = None,
         accept: str = "application/vnd.github+json",
-        max_pages: int = 10,
+        max_pages: int | None = None,
         per_page: int = 100,
         cache_getter: Any | None = None,
         cache_setter: Any | None = None,
     ) -> Generator[tuple[int, list[dict[str, Any]], int], None, None]:
         """Yield (status, items, page_number) for each page of a paginated endpoint.
+
+        max_pages: stop after N pages. None (default) means paginate to
+        exhaustion — the loop ends naturally when GitHub returns a short/empty
+        page. Setting a cap is only useful for intentional truncation (e.g.
+        events, where recent-only is fine). For full-state collectors (stars,
+        followers, repos) a cap causes `replace_current + diff` to fabricate
+        phantom removals for anything past the cap, so those callers pass None.
 
         cache_getter: callable(cache_key) -> CacheEntry
         cache_setter: callable(cache_key, headers) -> None
@@ -177,7 +184,9 @@ class GitHubClient:
         base_params = dict(params or {})
         base_params["per_page"] = per_page
 
-        for page in range(1, max_pages + 1):
+        page = 0
+        while max_pages is None or page < max_pages:
+            page += 1
             page_params = {**base_params, "page": page}
             cache_key = f"{path}:page:{page}:per:{per_page}"
 
