@@ -211,5 +211,4 @@ gh_monitor_state/
 *.db
 *.db-shm
 *.db-wal
-uv.lock
 *.csv
