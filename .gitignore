@@ -214,6 +214,6 @@ gh_monitor_state/
 *.csv
 
 # Demo
-demo/*.sh
-demo/*.cast
-demo/*.md
+assets/*.sh
+assets/*.cast
+assets/*.md
