@@ -212,3 +212,8 @@ gh_monitor_state/
 *.db-shm
 *.db-wal
 *.csv
+
+# Demo
+demo/*.sh
+demo/*.cast
+demo/*.md
