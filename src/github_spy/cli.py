@@ -13,9 +13,7 @@ from github_spy import __version__
 from github_spy.client import GitHubClient
 from github_spy.monitor import snapshot, watch
 from github_spy.output import (
-    console as output_console,
-)
-from github_spy.output import (
+    collection_progress,
     export_data,
     render_diff,
     render_event_detail,
@@ -23,6 +21,9 @@ from github_spy.output import (
     render_snapshot,
     render_stats,
     render_users,
+)
+from github_spy.output import (
+    console as output_console,
 )
 from github_spy.storage import DEFAULT_DB_DIR, DEFAULT_DB_NAME, Storage
 
@@ -161,16 +162,18 @@ def snapshot_cmd(
     ):
         for username in usernames:
             try:
-                summary = snapshot(
-                    client,
-                    storage,
-                    username,
-                    collect=collectors,
-                    events_pages=events_pages,
-                    stars_pages=stars_pages,
-                    followers_pages=followers_pages,
-                    repos_pages=repos_pages,
-                )
+                with collection_progress(username) as on_progress:
+                    summary = snapshot(
+                        client,
+                        storage,
+                        username,
+                        collect=collectors,
+                        events_pages=events_pages,
+                        stars_pages=stars_pages,
+                        followers_pages=followers_pages,
+                        repos_pages=repos_pages,
+                        on_progress=on_progress,
+                    )
                 render_snapshot(summary, as_json=as_json)
             except Exception as exc:
                 output_console.print(f"[red]Error collecting {username}: {exc}[/red]")

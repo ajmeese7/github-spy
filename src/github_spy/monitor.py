@@ -16,6 +16,8 @@ from github_spy.models import CollectionResult, SnapshotSummary
 from github_spy.storage import Storage, utc_now_iso
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from github_spy.client import GitHubClient
 
 log = logging.getLogger(__name__)
@@ -39,29 +41,44 @@ def snapshot(
     stars_pages: int | None = None,
     followers_pages: int | None = None,
     repos_pages: int | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> SnapshotSummary:
-    """Run a single collection pass for one user."""
+    """Run a single collection pass for one user.
+
+    on_progress: optional callback(step_name) invoked immediately before each
+    network-bound collector runs, so callers can surface progress (e.g. a spinner).
+    """
     collectors = _resolve_collectors(collect)
     results: list[CollectionResult] = []
 
+    def _step(name: str) -> None:
+        if on_progress:
+            on_progress(name)
+
     # Profile is always fetched (needed for context)
+    _step("profile")
     profile_snap, profile_result = fetch_profile(client, storage, username)
     if "profile" in collectors:
         results.append(profile_result)
 
     if "events" in collectors:
+        _step("events")
         results.append(fetch_events(client, storage, username, max_pages=events_pages))
 
     if "stars" in collectors:
+        _step("stars")
         results.append(fetch_stars(client, storage, username, max_pages=stars_pages))
 
     if "followers" in collectors:
+        _step("followers")
         results.append(fetch_followers(client, storage, username, max_pages=followers_pages))
 
     if "following" in collectors:
+        _step("following")
         results.append(fetch_following(client, storage, username, max_pages=followers_pages))
 
     if "repos" in collectors:
+        _step("repos")
         results.append(fetch_repos(client, storage, username, max_pages=repos_pages))
 
     return SnapshotSummary(

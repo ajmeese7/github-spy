@@ -4,17 +4,59 @@ from __future__ import annotations
 
 import csv
 import json
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, TextIO
 
 from rich.console import Console
 from rich.json import JSON
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from github_spy.models import CollectionResult, SnapshotSummary
 
 console = Console()
+
+# Human-readable labels for each snapshot collector step, shown in the spinner.
+_COLLECTOR_LABELS = {
+    "profile": "profile",
+    "events": "events",
+    "stars": "stars",
+    "followers": "followers",
+    "following": "following",
+    "repos": "repos",
+}
+
+
+@contextmanager
+def collection_progress(username: str) -> Iterator[Callable[[str], None]]:
+    """Yield a step-updater that drives a transient spinner on stderr.
+
+    The spinner renders to stderr and only when stderr is an interactive
+    terminal, so piping stdout to a file (or using --json) stays byte-clean.
+    When not attached to a TTY, the yielded callable is a no-op and nothing is
+    written anywhere.
+    """
+    err_console = Console(stderr=True)
+    if not err_console.is_terminal:
+        yield lambda _step: None
+        return
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[cyan]Collecting [bold]{task.fields[user]}[/bold], {task.description}"),
+        console=err_console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("starting…", user=username)
+
+        def update(step: str) -> None:
+            progress.update(task, description=_COLLECTOR_LABELS.get(step, step))
+
+        yield update
 
 
 # ---------------------------------------------------------------------------
