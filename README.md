@@ -5,6 +5,10 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
+<p align="center">
+  <img src="demo/demo.gif" alt="github-spy demo: snapshot, stats, inspect, and diff" width="800">
+</p>
+
 ---
 
 GitHub's public data is ephemeral. Events disappear after 90 days. Stars, followers, and repos are mutable with no built-in changelog. If someone unstars a repo, unfollows you, or deletes a project, that information is gone.
